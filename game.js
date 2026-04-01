@@ -1,17 +1,16 @@
 /**
- * 台灣麻雀 v4 - 完整重寫
- * 規則：152張牌，每人16張，胡牌需5組+1對=17張
+ * 台灣麻雀 v5 - 優化版
+ * - 搭子放入手牌，可參與碰吃
+ * - 顯示吃碰槓的牌
+ * - 優化UI設計
  */
 
 // ============ 常量 ============
-const SUITS = ['萬', '筒', '索'];
 const WINDS = ['東', '南', '西', '北'];
 const DRAGONS = ['紅中', '發財', '白板'];
 const FLOWERS = ['春', '夏', '秋', '冬', '梅', '蘭', '菊', '竹'];
 const JOKERS = ['皇', '筒索萬', '筒', '索', '萬', '番', '東南西北', '中發白'];
 const NUMBERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-
-// 花牌對應座位：春梅=東(0), 夏蘭=南(1), 秋菊=西(2), 冬竹=北(3)
 const FLOWER_SEAT = [0, 1, 2, 3, 0, 1, 2, 3];
 
 // ============ 遊戲狀態 ============
@@ -20,15 +19,15 @@ let G = {
     wall: [],
     deadWall: [],
     players: [],
-    turn: 0,          // 當前玩家
+    turn: 0,
     dealer: 0,
     round: 1,
-    consWins: 0,      // 連莊
+    consWins: 0,
     selected: -1,
-    lastTile: null,   // 最後打出的牌
+    lastTile: null,
     lastBy: -1,
-    claims: {},       // 可用的吃碰槓胡
-    discardPile: []   // 棄牌區
+    claims: {},
+    discardPile: []
 };
 
 // ============ 牌 ============
@@ -57,6 +56,11 @@ function makeTile(id, type, value) {
 }
 
 function sameTile(a, b) {
+    if (a.type === 'joker' || b.type === 'joker') {
+        // 搭子特殊處理 - 可以當任何相同牌
+        if (a.type === 'joker' && b.type === 'joker') return a.joker === b.joker;
+        return false;
+    }
     if (a.type !== b.type) return false;
     if (a.num !== undefined && a.num !== b.num) return false;
     if (a.wind !== undefined && a.wind !== b.wind) return false;
@@ -64,20 +68,21 @@ function sameTile(a, b) {
     return true;
 }
 
-function isHonor(t) {
-    return t.type === 'wind' || t.type === 'dragon';
+function sameTileWithJoker(a, b) {
+    // 用於碰/吃檢查，搭子可以代替
+    if (a.type === 'joker' || b.type === 'joker') return true;
+    return sameTile(a, b);
 }
 
-function isSuited(t) {
-    return t.type === 'wan' || t.type === 'tong' || t.type === 'suo';
-}
+function isHonor(t) { return t.type === 'wind' || t.type === 'dragon'; }
+function isSuited(t) { return t.type === 'wan' || t.type === 'tong' || t.type === 'suo'; }
+function isJoker(t) { return t.type === 'joker'; }
 
 // ============ 創建牌組 ============
 function createDeck() {
     let deck = [];
     let id = 0;
     
-    // 萬筒索各36張
     for (let suit of ['wan', 'tong', 'suo']) {
         for (let n = 1; n <= 9; n++) {
             for (let i = 0; i < 4; i++) {
@@ -86,31 +91,27 @@ function createDeck() {
         }
     }
     
-    // 風牌16張
     for (let w = 0; w < 4; w++) {
         for (let i = 0; i < 4; i++) {
             deck.push(makeTile(id++, 'wind', w));
         }
     }
     
-    // 三元牌12張
     for (let d = 0; d < 3; d++) {
         for (let i = 0; i < 4; i++) {
             deck.push(makeTile(id++, 'dragon', d));
         }
     }
     
-    // 花牌8張
     for (let f = 0; f < 8; f++) {
         deck.push(makeTile(id++, 'flower', f));
     }
     
-    // 搭子8張
     for (let j = 0; j < 8; j++) {
         deck.push(makeTile(id++, 'joker', j));
     }
     
-    return deck; // 152張
+    return deck;
 }
 
 function shuffle(arr) {
@@ -123,31 +124,25 @@ function shuffle(arr) {
 // ============ 玩家 ============
 function createPlayer(id, name, isAI) {
     return {
-        id,
-        name,
-        isAI,
+        id, name, isAI,
         isDealer: id === 0,
         seat: id,
         hand: [],
-        melds: [],    // [{type:'pong', tiles:[...]}, ...]
-        flowers: [],
-        jokers: []
+        melds: [],
+        flowers: []
     };
 }
 
 // ============ 開始遊戲 ============
 function startGame() {
-    console.log('=== 遊戲開始 ===');
+    console.log('=== 遊戲開始 v5 ===');
     
-    // 創建牌組
     let deck = createDeck();
     shuffle(deck);
     
-    // 槌牌16張
     G.deadWall = deck.splice(deck.length - 16);
     G.wall = deck;
     
-    // 創建玩家
     G.players = [
         createPlayer(0, '你', false),
         createPlayer(1, 'AI 小強', true),
@@ -166,7 +161,6 @@ function startGame() {
         sortHand(p);
     }
     
-    // 重置狀態
     G.turn = 0;
     G.phase = 'playing';
     G.selected = -1;
@@ -175,14 +169,12 @@ function startGame() {
     G.claims = {};
     G.discardPile = [];
     
-    // UI
     document.getElementById('discardArea').innerHTML = '';
     closeModal();
     updateUI();
     showMsg('遊戲開始！你是莊家，請摸牌。');
 }
 
-// 發牌（處理補花）
 function dealTo(player) {
     if (G.wall.length === 0) return null;
     
@@ -193,17 +185,14 @@ function dealTo(player) {
         if (G.deadWall.length > 0) {
             return dealTo(player);
         }
-    } else if (tile.type === 'joker') {
-        player.jokers.push(tile);
-        return tile;
     } else {
+        // 搭子和普通牌都放入手牌
         player.hand.push(tile);
         return tile;
     }
     return null;
 }
 
-// 補牌（從槌牌）
 function supplement(player) {
     if (G.deadWall.length === 0) return null;
     
@@ -212,9 +201,6 @@ function supplement(player) {
     if (tile.type === 'flower') {
         player.flowers.push(tile);
         return supplement(player);
-    } else if (tile.type === 'joker') {
-        player.jokers.push(tile);
-        return tile;
     } else {
         player.hand.push(tile);
         return tile;
@@ -223,15 +209,14 @@ function supplement(player) {
 
 function sortHand(p) {
     p.hand.sort((a, b) => {
-        let order = { wan: 0, tong: 1, suo: 2, wind: 3, dragon: 4 };
+        let order = { wan: 0, tong: 1, suo: 2, wind: 3, dragon: 4, joker: 5 };
         if (order[a.type] !== order[b.type]) return order[a.type] - order[b.type];
-        return (a.num || a.wind || a.dragon || 0) - (b.num || b.wind || b.dragon || 0);
+        return (a.num || a.wind || a.dragon || a.joker || 0) - (b.num || b.wind || b.dragon || b.joker || 0);
     });
 }
 
 // ============ 玩家操作 ============
 
-// 摸牌
 function drawTile() {
     if (G.phase !== 'playing' || G.turn !== 0) return;
     
@@ -246,7 +231,7 @@ function drawTile() {
     
     // 檢查自摸
     if (canWin(G.players[0])) {
-        G.claims = { selfWin: true };
+        G.claims = { 0: { hu: true } };
         showActionPanel({ hu: true });
     }
     
@@ -254,14 +239,12 @@ function drawTile() {
     showMsg(tile ? `摸到 ${tile.name}` : '補花');
 }
 
-// 選牌
 function selectTile(idx) {
     if (G.phase !== 'playing' || G.turn !== 0) return;
     G.selected = G.selected === idx ? -1 : idx;
     updateUI();
 }
 
-// 打牌
 function discardTile() {
     if (G.phase !== 'playing' || G.turn !== 0 || G.selected < 0) {
         showMsg('請先選擇一張牌！');
@@ -279,11 +262,10 @@ function discardTile() {
     addDiscardUI(tile);
     showMsg(`打出 ${tile.name}`);
     
-    // 檢查其他人
     checkClaims(tile, 0);
 }
 
-// ============ 吃碰槓胡檢查 ============
+// ============ 吃碰槓胡 ============
 
 function checkClaims(tile, from) {
     G.claims = {};
@@ -294,16 +276,9 @@ function checkClaims(tile, from) {
         let p = G.players[i];
         let c = {};
         
-        // 胡牌
         if (canWinWith(p, tile)) c.hu = true;
-        
-        // 槓
         if (canKong(p, tile)) c.kong = true;
-        
-        // 碰
         if (canPong(p, tile)) c.pong = true;
-        
-        // 吃（只有下家）
         if ((from + 1) % 4 === i && canChow(p, tile)) c.chow = true;
         
         if (Object.keys(c).length > 0) {
@@ -319,7 +294,6 @@ function checkClaims(tile, from) {
 }
 
 function processClaims() {
-    // 找最高優先級
     let best = null;
     let bestP = null;
     let priority = { hu: 4, kong: 3, pong: 2, chow: 1 };
@@ -333,11 +307,9 @@ function processClaims() {
         }
     }
     
-    // 玩家有選項？
     if (G.claims[0]) {
         showActionPanel(G.claims[0]);
     } else {
-        // AI自動
         doClaim(bestP, best);
     }
 }
@@ -357,6 +329,7 @@ function doClaim(pid, action) {
     
     if (action === 'hu') {
         G.players[pid].hand.push(G.lastTile);
+        sortHand(G.players[pid]);
         showGameResult(G.players[pid], pid === G.lastBy);
         return;
     }
@@ -365,14 +338,22 @@ function doClaim(pid, action) {
     
     if (action === 'kong' || action === 'pong') {
         let cnt = action === 'kong' ? 3 : 2;
+        let tiles = [G.lastTile];
+        
         for (let i = 0; i < cnt; i++) {
-            let idx = p.hand.findIndex(t => sameTile(t, G.lastTile));
-            if (idx >= 0) p.hand.splice(idx, 1);
+            let idx = p.hand.findIndex(t => sameTileWithJoker(t, G.lastTile));
+            if (idx >= 0) {
+                tiles.push(p.hand.splice(idx, 1)[0]);
+            }
         }
         
-        p.melds.push({ type: action, tile: G.lastTile });
+        p.melds.push({ 
+            type: action, 
+            tiles: tiles,
+            from: G.lastBy
+        });
         
-        showMsg(`${p.name} ${action === 'kong' ? '槓' : '碰'} ${G.lastTile.name}`);
+        showMsg(`${p.name} ${action === 'kong' ? '槓' : '碰'} ${G.lastTile.name}！`);
         
         if (action === 'kong') {
             supplement(p);
@@ -396,9 +377,14 @@ function doClaim(pid, action) {
                 let idx = p.hand.findIndex(ht => ht.id === t.id);
                 if (idx >= 0) p.hand.splice(idx, 1);
             }
-            p.melds.push({ type: 'chow', tiles: [...opt, G.lastTile] });
             
-            showMsg(`${p.name} 吃 ${G.lastTile.name}`);
+            p.melds.push({ 
+                type: 'chow', 
+                tiles: [...opt, G.lastTile],
+                from: G.lastBy
+            });
+            
+            showMsg(`${p.name} 吃 ${G.lastTile.name}！`);
             
             G.turn = pid;
             updateUI();
@@ -413,13 +399,13 @@ function doClaim(pid, action) {
 // ============ 牌型檢查 ============
 
 function canPong(p, tile) {
-    if (tile.type === 'flower' || tile.type === 'joker') return false;
-    return p.hand.filter(t => sameTile(t, tile)).length >= 2;
+    if (tile.type === 'flower') return false;
+    return p.hand.filter(t => sameTileWithJoker(t, tile)).length >= 2;
 }
 
 function canKong(p, tile) {
-    if (tile.type === 'flower' || tile.type === 'joker') return false;
-    return p.hand.filter(t => sameTile(t, tile)).length >= 3;
+    if (tile.type === 'flower') return false;
+    return p.hand.filter(t => sameTileWithJoker(t, tile)).length >= 3;
 }
 
 function canChow(p, tile) {
@@ -433,28 +419,22 @@ function findChow(p, tile) {
     let n = tile.num;
     let suit = tile.suit;
     
-    let sameSuit = p.hand.filter(t => t.suit === suit);
+    let sameSuit = p.hand.filter(t => isSuited(t) && t.suit === suit);
     
     // n-2, n-1
     let a = sameSuit.filter(t => t.num === n - 2);
     let b = sameSuit.filter(t => t.num === n - 1);
-    if (a.length > 0 && b.length > 0) {
-        opts.push([a[0], b[0]]);
-    }
+    if (a.length > 0 && b.length > 0) opts.push([a[0], b[0]]);
     
     // n-1, n+1
     let c = sameSuit.filter(t => t.num === n - 1);
     let d = sameSuit.filter(t => t.num === n + 1);
-    if (c.length > 0 && d.length > 0) {
-        opts.push([c[0], d[0]]);
-    }
+    if (c.length > 0 && d.length > 0) opts.push([c[0], d[0]]);
     
     // n+1, n+2
     let e = sameSuit.filter(t => t.num === n + 1);
     let f = sameSuit.filter(t => t.num === n + 2);
-    if (e.length > 0 && f.length > 0) {
-        opts.push([e[0], f[0]]);
-    }
+    if (e.length > 0 && f.length > 0) opts.push([e[0], f[0]]);
     
     return opts;
 }
@@ -468,22 +448,50 @@ function canWinWith(p, tile) {
     return checkHand(temp, p.melds);
 }
 
-// 檢查是否可以胡牌（5組+1對=17張）
 function checkHand(hand, melds) {
-    let meldCnt = melds.reduce((s, m) => s + (m.type === 'kong' ? 4 : 3), 0);
+    let meldCnt = melds.reduce((s, m) => s + m.tiles.length, 0);
     if (hand.length + meldCnt !== 17) return false;
     
     let needSets = 5 - melds.length;
     return tryForm([...hand], needSets, true);
 }
 
-// 嘗試組成牌型
 function tryForm(tiles, needSets, needPair) {
     if (needSets === 0 && !needPair) return true;
     if (tiles.length === 0) return !needSets && !needPair;
     
-    tiles.sort((a, b) => a.id - b.id);
+    // 把搭子放到最後處理
+    tiles.sort((a, b) => {
+        if (a.type === 'joker') return 1;
+        if (b.type === 'joker') return -1;
+        return a.id - b.id;
+    });
+    
     let first = tiles[0];
+    
+    // 搭子可以當任何牌
+    if (first.type === 'joker') {
+        // 嘗試做眼
+        if (needPair && tiles.length >= 2) {
+            let rest = tiles.slice(2);
+            if (tryForm(rest, needSets, false)) return true;
+        }
+        // 嘗試做刻子
+        if (needSets && tiles.length >= 3) {
+            let rest = tiles.slice(3);
+            if (tryForm(rest, needSets - 1, needPair)) return true;
+        }
+        // 嘗試做順子（需要另外兩張）
+        if (needSets && tiles.length >= 1) {
+            for (let i = 1; i < tiles.length; i++) {
+                for (let j = i + 1; j < tiles.length; j++) {
+                    let rest = tiles.filter((t, idx) => idx !== 0 && idx !== i && idx !== j);
+                    if (tryForm(rest, needSets - 1, needPair)) return true;
+                }
+            }
+        }
+        return false;
+    }
     
     // 嘗試做眼
     if (needPair) {
@@ -498,10 +506,8 @@ function tryForm(tiles, needSets, needPair) {
     if (needSets > 0) {
         let same = tiles.filter(t => sameTile(t, first));
         if (same.length >= 3) {
-            let rest = tiles.filter(t => !sameTile(t, first) || tiles.filter(x => sameTile(x, first)).indexOf(t) >= 3);
-            // 移除3張
             let count = 0;
-            rest = tiles.filter(t => {
+            let rest = tiles.filter(t => {
                 if (sameTile(t, first) && count < 3) {
                     count++;
                     return false;
@@ -550,31 +556,27 @@ function aiPlay(pid) {
         return;
     }
     
-    // 摸牌
     dealTo(p);
     sortHand(p);
     showMsg(`${p.name} 摸牌...`);
     updateUI();
     
-    // 檢查自摸
     if (canWin(p)) {
         setTimeout(() => showGameResult(p, true), 500);
         return;
     }
     
-    // 打牌
     setTimeout(() => aiDiscard(pid), 700);
 }
 
 function aiDiscard(pid) {
     let p = G.players[pid];
     
-    // 策略：打孤張
     let choice = null;
     
     // 孤張字牌
     for (let t of p.hand) {
-        if (isHonor(t) && p.hand.filter(x => sameTile(x, t)).length === 1) {
+        if (!isJoker(t) && isHonor(t) && p.hand.filter(x => sameTile(x, t)).length === 1) {
             choice = t;
             break;
         }
@@ -583,7 +585,7 @@ function aiDiscard(pid) {
     // 孤張邊張
     if (!choice) {
         for (let t of p.hand) {
-            if (isSuited(t) && (t.num === 1 || t.num === 9)) {
+            if (!isJoker(t) && isSuited(t) && (t.num === 1 || t.num === 9)) {
                 if (p.hand.filter(x => sameTile(x, t)).length === 1) {
                     choice = t;
                     break;
@@ -595,17 +597,19 @@ function aiDiscard(pid) {
     // 其他孤張
     if (!choice) {
         for (let t of p.hand) {
-            if (p.hand.filter(x => sameTile(x, t)).length === 1) {
+            if (!isJoker(t) && p.hand.filter(x => sameTile(x, t)).length === 1) {
                 choice = t;
                 break;
             }
         }
     }
     
-    // 最後一張
-    if (!choice) choice = p.hand[p.hand.length - 1];
+    // 最後一張（保留搭子）
+    if (!choice) {
+        let nonJokers = p.hand.filter(t => !isJoker(t));
+        choice = nonJokers.length > 0 ? nonJokers[nonJokers.length - 1] : p.hand[p.hand.length - 1];
+    }
     
-    // 打出
     let idx = p.hand.findIndex(t => t.id === choice.id);
     if (idx >= 0) p.hand.splice(idx, 1);
     
@@ -617,7 +621,6 @@ function aiDiscard(pid) {
     showMsg(`${p.name} 打出 ${choice.name}`);
     updateUI();
     
-    // 檢查玩家
     setTimeout(() => checkClaims(choice, pid), 300);
 }
 
@@ -627,7 +630,6 @@ function calcScore(p, selfDraw) {
     let fans = {};
     let total = 0;
     
-    // 花牌
     let correct = 0, wrong = 0;
     for (let f of p.flowers) {
         if (FLOWER_SEAT[f.flower] === p.seat) correct++;
@@ -638,20 +640,16 @@ function calcScore(p, selfDraw) {
     if (correct > 0) { fans['正花'] = correct * 2; total += correct * 2; }
     if (wrong > 0) { fans['爛花'] = wrong; total += wrong; }
     
-    // 自摸
     if (selfDraw) { fans['自摸'] = 1; total += 1; }
     
-    // 門清
     let concealed = p.melds.every(m => m.concealed);
     if (concealed) {
         if (selfDraw) { fans['門清自摸'] = 5; total += 5; }
         else { fans['門清'] = 3; total += 3; }
     }
     
-    // 莊家
     if (p.isDealer) { fans['做莊'] = 1; total += 1; }
     
-    // 連莊
     if (G.consWins > 0 && p.isDealer) {
         let bonus = G.consWins * 2 + 1;
         fans['連莊'] = bonus;
@@ -670,8 +668,8 @@ function updateUI() {
     
     renderHand();
     renderOpponents();
-    renderFlowersJokers();
-    renderMelds();
+    renderFlowers();
+    renderPlayerMelds();
     updateButtons();
 }
 
@@ -683,13 +681,18 @@ function renderHand() {
     if (!p) return;
     
     p.hand.forEach((t, i) => {
-        let div = document.createElement('div');
-        div.className = 'tile ' + tileClass(t);
+        let div = createTileElement(t);
         if (G.selected === i) div.classList.add('selected');
-        div.textContent = t.name;
         div.onclick = () => selectTile(i);
         el.appendChild(div);
     });
+}
+
+function createTileElement(t, small = false) {
+    let div = document.createElement('div');
+    div.className = 'tile' + (small ? ' tile-small' : '') + ' ' + tileClass(t);
+    div.innerHTML = `<span class="tile-text">${t.name}</span>`;
+    return div;
 }
 
 function tileClass(t) {
@@ -697,7 +700,9 @@ function tileClass(t) {
     if (t.type === 'tong') return 'tong';
     if (t.type === 'suo') return 'suo';
     if (t.type === 'wind') return 'wind';
-    if (t.type === 'dragon') return t.dragon === 0 ? 'dragon-red' : t.dragon === 1 ? 'dragon-green' : 'dragon-white';
+    if (t.type === 'dragon') {
+        return t.dragon === 0 ? 'dragon-red' : t.dragon === 1 ? 'dragon-green' : 'dragon-white';
+    }
     if (t.type === 'flower') return 'flower';
     if (t.type === 'joker') return 'joker';
     return '';
@@ -705,55 +710,83 @@ function tileClass(t) {
 
 function renderOpponents() {
     for (let i = 1; i <= 3; i++) {
-        let el = document.getElementById(`tiles-${i}`);
+        let tilesEl = document.getElementById(`tiles-${i}`);
+        let meldsEl = document.getElementById(`melds-${i}`);
         let opp = document.getElementById(`opponent-${i}`);
         let p = G.players[i];
         
-        if (el && p) {
-            el.innerHTML = '';
+        if (tilesEl && p) {
+            tilesEl.innerHTML = '';
             let cnt = opp.querySelector('.tile-count');
             if (cnt) cnt.textContent = p.hand.length;
             
             for (let j = 0; j < Math.min(p.hand.length, 8); j++) {
                 let div = document.createElement('div');
                 div.className = 'tile-back';
-                el.appendChild(div);
+                tilesEl.appendChild(div);
+            }
+        }
+        
+        // 顯示對手的吃碰槓
+        if (meldsEl && p) {
+            meldsEl.innerHTML = '';
+            for (let m of p.melds) {
+                let div = document.createElement('div');
+                div.className = 'meld-group';
+                
+                let label = document.createElement('span');
+                label.className = 'meld-label';
+                label.textContent = m.type === 'chow' ? '吃' : m.type === 'pong' ? '碰' : '槓';
+                div.appendChild(label);
+                
+                for (let t of m.tiles) {
+                    div.appendChild(createTileElement(t, true));
+                }
+                
+                meldsEl.appendChild(div);
             }
         }
     }
 }
 
-function renderFlowersJokers() {
-    let el = document.getElementById('flowersArea');
+function renderFlowers() {
     let p = G.players[0];
     if (!p) return;
     
-    let html = '<span>花牌: </span>';
-    for (let f of p.flowers) {
-        html += `<span class="tile tile-small flower">${f.name}</span> `;
-    }
+    let section = document.getElementById('flowersSection');
+    let display = document.getElementById('flowersDisplay');
     
-    if (p.jokers.length > 0) {
-        html += '<span>| 搭子: </span>';
-        for (let j of p.jokers) {
-            html += `<span class="tile tile-small joker">${j.name}</span> `;
+    if (p.flowers.length > 0) {
+        section.style.display = 'flex';
+        display.innerHTML = '';
+        for (let f of p.flowers) {
+            display.appendChild(createTileElement(f, true));
         }
+    } else {
+        section.style.display = 'none';
     }
-    
-    el.innerHTML = html;
 }
 
-function renderMelds() {
-    let el = document.getElementById('meldsArea');
+function renderPlayerMelds() {
+    let el = document.getElementById('playerMelds');
     let p = G.players[0];
     if (!p) return;
     
     el.innerHTML = '';
+    
     for (let m of p.melds) {
         let div = document.createElement('div');
-        div.className = 'meld';
-        let lbl = m.type === 'chow' ? '吃' : m.type === 'pong' ? '碰' : '槓';
-        div.innerHTML = `<span class="meld-label">${lbl}</span>`;
+        div.className = 'meld-set';
+        
+        let label = document.createElement('span');
+        label.className = 'meld-type';
+        label.textContent = m.type === 'chow' ? '吃' : m.type === 'pong' ? '碰' : '槓';
+        div.appendChild(label);
+        
+        for (let t of m.tiles) {
+            div.appendChild(createTileElement(t, true));
+        }
+        
         el.appendChild(div);
     }
 }
@@ -768,10 +801,7 @@ function updateButtons() {
 
 function addDiscardUI(tile) {
     let el = document.getElementById('discardArea');
-    let div = document.createElement('div');
-    div.className = 'tile tile-small ' + tileClass(tile);
-    div.textContent = tile.name;
-    el.appendChild(div);
+    el.appendChild(createTileElement(tile, true));
 }
 
 function showMsg(txt) {
@@ -801,7 +831,8 @@ function showGameResult(winner, selfDraw) {
     
     let r = calcScore(winner, selfDraw);
     
-    document.getElementById('resultTitle').textContent = `${winner.name} ${selfDraw ? '自摸' : '胡牌'}！`;
+    document.getElementById('resultTitle').textContent = 
+        `${winner.name} ${selfDraw ? '自摸' : '胡牌'}！`;
     
     let list = document.getElementById('fanList');
     list.innerHTML = '';
@@ -826,5 +857,5 @@ function closeModal() {
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
     updateUI();
-    console.log('台灣麻雀 v4 載入完成');
+    console.log('台灣麻雀 v5 載入完成');
 });
